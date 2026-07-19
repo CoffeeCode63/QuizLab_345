@@ -2273,7 +2273,10 @@ function exitQuiz() { showPage('topics'); }
 // ─── HISTORY ─────────────────────────────────────────────
 // ─── Panel del maestro ────────────────────────────────────
 function renderPanel() {
-  const students = (CLOUD ? _cloudRoster : ROSTER).filter(r => r.role === 'student');
+  const students = (CLOUD ? _cloudRoster : ROSTER)
+    .filter(r => r.role === 'student')
+    // Orden "natural": entiende los números dentro del nombre (Alumno 2 antes que Alumno 10)
+    .sort((a, b) => a.name.localeCompare(b.name, 'es', { numeric: true, sensitivity: 'base' }));
   const hist = state.history;
 
   // Métricas generales

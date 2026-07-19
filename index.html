@@ -392,6 +392,16 @@
   .user-chip .avatar { width:30px; height:30px; border-radius:50%; background:var(--accent); color:#fff; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:13px; flex-shrink:0; }
   .user-chip .uname { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .student-row { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:14px 18px; display:flex; align-items:center; gap:14px; margin-bottom:10px; flex-wrap:wrap; }
+  .student-block { margin-bottom:10px; }
+  .student-block .student-row { margin-bottom:0; }
+  .student-row.clickable { cursor:pointer; transition:border-color .2s; }
+  .student-row.clickable:hover { border-color:var(--accent); }
+  .expand-arrow { margin-left:auto; color:var(--muted); font-size:13px; transition:transform .2s; flex-shrink:0; }
+  .panel-detail { background:var(--surface); border:1px solid var(--border); border-top:none; border-radius:0 0 var(--radius) var(--radius); padding:12px 18px 14px; margin-top:-6px; }
+  .detail-row { display:flex; align-items:center; gap:12px; padding:8px 0; border-bottom:1px solid var(--border); }
+  .detail-row:last-child { border-bottom:none; }
+  .panel-empty { font-size:13px; color:var(--muted); font-style:italic; padding:6px 0; }
+  .panel-tip { font-size:12px; color:var(--muted); margin:-8px 0 12px; }
   .student-code { font-family:monospace; font-size:15px; font-weight:700; letter-spacing:.15em; background:var(--accent-glow); color:var(--accent); border:1px dashed var(--accent); border-radius:8px; padding:6px 12px; }
   .student-name { font-weight:600; font-size:14px; flex:1; min-width:120px; }
   .student-stats { font-size:12px; color:var(--muted); }
@@ -678,7 +688,7 @@
 -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-  const SUPABASE_URL      = "https://jpkjjzbvyppbstncedrx.supabase.co";   // ej: "https://abcdxyz.supabase.co"
+  const SUPABASE_URL      = "https://jpkjjzbvyppbstncedrx.supabase.co/";   // ej: "https://abcdxyz.supabase.co"
   const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impwa2pqemJ2eXBwYnN0bmNlZHJ4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM2MTMxNjAsImV4cCI6MjA5OTE4OTE2MH0.2GZwwYm6gBDa0FhfXv0ZzkKMAjSwISCXohQ0PQa7LuU";   // ej: "eyJhbGciOiJI..."
 </script>
 <!-- ════════════════════════════════════════════════════════════════ -->
@@ -881,7 +891,11 @@
       <div class="page" id="page-panel">
         <div id="panel-stats" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:24px"></div>
         <p class="section-title">Alumnos y códigos de acceso</p>
+        <p class="panel-tip">Toca un alumno para ver sus actividades completadas.</p>
         <div id="panel-students"></div>
+        <p class="section-title" style="margin-top:28px">Actividades</p>
+        <p class="panel-tip">Toca una actividad para ver qué alumnos la han completado y su calificación.</p>
+        <div id="panel-quizzes"></div>
         <p class="section-title" style="margin-top:28px">Actividad reciente</p>
         <div id="panel-activity"></div>
       </div>
@@ -2271,19 +2285,49 @@ function renderPanel() {
     <div class="stat-card"><div class="stat-number">${activeStudents}</div><div class="stat-label">Alumnos con actividad</div></div>
     <div class="stat-card"><div class="stat-number">${avg}%</div><div class="stat-label">Promedio del grupo</div></div>`;
 
-  // Lista de alumnos con su código y progreso
+  // 1) Alumnos: fila clicable que expande sus actividades completadas
   document.getElementById('panel-students').innerHTML = students.map(s => {
     const sh = hist.filter(h => h.user && h.user.code === s.code);
     const savg = sh.length ? Math.round(sh.reduce((x,h)=>x+h.pct,0)/sh.length) : null;
     return `
-      <div class="student-row">
-        <span class="student-code">${s.code}</span>
-        <span class="student-name">${escapeHTML(s.name)}</span>
-        <span class="student-stats">${sh.length} partida${sh.length===1?'':'s'}${savg!==null?` · promedio <b style="color:${pctColor(savg)}">${savg}%</b>`:' · sin actividad aún'}</span>
+      <div class="student-block" id="stu_${s.code}">
+        <div class="student-row clickable" onclick="togglePanelDetail('stu_${s.code}')">
+          <span class="student-code">${s.code}</span>
+          <span class="student-name">${escapeHTML(s.name)}</span>
+          <span class="student-stats">${sh.length} partida${sh.length===1?'':'s'}${savg!==null?` · promedio <b style="color:${pctColor(savg)}">${savg}%</b>`:' · sin actividad aún'}</span>
+          <span class="expand-arrow">▾</span>
+        </div>
+        <div class="panel-detail" style="display:none">${studentDetailHTML(s, sh)}</div>
       </div>`;
   }).join('');
 
-  // Actividad reciente (todos los alumnos)
+  // 2) Actividades: cada quiz expande la lista de alumnos que lo completaron
+  const quizzes = state.quizzes;
+  const studentCodes = new Set(students.map(s => s.code));
+  document.getElementById('panel-quizzes').innerHTML = quizzes.length ? quizzes.map(q => {
+    const qh = hist.filter(h => h.quizId === q.id && h.user && studentCodes.has(h.user.code));
+    // Alumnos únicos que lo completaron (con su mejor intento)
+    const byStudent = {};
+    qh.forEach(h => {
+      const c = h.user.code;
+      if (!byStudent[c] || h.pct > byStudent[c].pct) byStudent[c] = h;
+    });
+    const completedCount = Object.keys(byStudent).length;
+    const qavg = qh.length ? Math.round(qh.reduce((x,h)=>x+h.pct,0)/qh.length) : null;
+    const topic = findTopic(q.topic);
+    return `
+      <div class="student-block" id="qz_${q.id}">
+        <div class="student-row clickable" onclick="togglePanelDetail('qz_${q.id}')">
+          <span style="font-size:20px">${topic?.icon||'💡'}</span>
+          <span class="student-name">${escapeHTML(q.title)}</span>
+          <span class="student-stats">${completedCount} de ${students.length} alumno${students.length===1?'':'s'}${qavg!==null?` · promedio <b style="color:${pctColor(qavg)}">${qavg}%</b>`:''}</span>
+          <span class="expand-arrow">▾</span>
+        </div>
+        <div class="panel-detail" style="display:none">${quizDetailHTML(q, byStudent, students)}</div>
+      </div>`;
+  }).join('') : `<div class="empty"><div class="empty-icon">📚</div><h3>Sin actividades</h3><p>Crea quizzes para verlos aquí.</p></div>`;
+
+  // 3) Actividad reciente (todos los alumnos)
   const recent = [...hist].reverse().slice(0, 15);
   document.getElementById('panel-activity').innerHTML = recent.length ? recent.map(h => {
     const color = pctColor(h.pct);
@@ -2299,6 +2343,64 @@ function renderPanel() {
         <div class="score-badge" style="color:${color}">${h.pct}%</div>
       </div>`;
   }).join('') : `<div class="empty"><div class="empty-icon">📭</div><h3>Sin actividad</h3><p>Cuando los alumnos jueguen quizzes, verás sus resultados aquí.</p></div>`;
+}
+
+// Detalle de un alumno: sus actividades completadas
+function studentDetailHTML(s, sh) {
+  if (!sh.length) return `<div class="panel-empty">Este alumno aún no ha completado ninguna actividad.</div>`;
+  const rows = [...sh].reverse().map(h => {
+    const color = pctColor(h.pct);
+    const date = new Date(h.date).toLocaleDateString('es',{day:'numeric',month:'short',year:'numeric'});
+    return `
+      <div class="detail-row">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHTML(h.quizTitle)}</div>
+          <div style="font-size:11.5px;color:var(--muted)">${h.correct}/${h.total} correctas · ${date}</div>
+        </div>
+        <div class="score-badge" style="color:${color};font-size:16px">${h.pct}%</div>
+      </div>`;
+  }).join('');
+  return `<div style="font-size:12px;color:var(--muted);margin-bottom:8px">${sh.length} actividad${sh.length===1?'':'es'} completada${sh.length===1?'':'s'}:</div>` + rows;
+}
+
+// Detalle de una actividad: alumnos que la completaron (mejor intento) y quiénes faltan
+function quizDetailHTML(q, byStudent, students) {
+  const done = students.filter(s => byStudent[s.code]);
+  const pending = students.filter(s => !byStudent[s.code]);
+  let html = '';
+  if (done.length) {
+    html += done.map(s => {
+      const h = byStudent[s.code];
+      const color = pctColor(h.pct);
+      const attempts = state.history.filter(x => x.quizId === q.id && x.user && x.user.code === s.code).length;
+      const date = new Date(h.date).toLocaleDateString('es',{day:'numeric',month:'short'});
+      return `
+        <div class="detail-row">
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600;font-size:13px">${escapeHTML(s.name)}</div>
+            <div style="font-size:11.5px;color:var(--muted)">${attempts} intento${attempts===1?'':'s'} · mejor: ${h.correct}/${h.total} · ${date}</div>
+          </div>
+          <div class="score-badge" style="color:${color};font-size:16px">${h.pct}%</div>
+        </div>`;
+    }).join('');
+  } else {
+    html += `<div class="panel-empty">Ningún alumno ha completado esta actividad todavía.</div>`;
+  }
+  if (pending.length && done.length) {
+    html += `<div style="font-size:12px;color:var(--muted);margin-top:10px">Pendientes: ${pending.map(s=>escapeHTML(s.name)).join(', ')}</div>`;
+  }
+  return html;
+}
+
+// Expande/colapsa un detalle del panel
+function togglePanelDetail(id) {
+  const block = document.getElementById(id);
+  if (!block) return;
+  const detail = block.querySelector('.panel-detail');
+  const arrow = block.querySelector('.expand-arrow');
+  const open = detail.style.display !== 'none';
+  detail.style.display = open ? 'none' : 'block';
+  if (arrow) arrow.style.transform = open ? '' : 'rotate(180deg)';
 }
 
 let _cloudRoster = [];
